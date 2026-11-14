@@ -1,5 +1,10 @@
 # Influx IT Build Assets
 
+[![Latest version](https://img.shields.io/packagist/v/influxit/build-assets)](https://packagist.org/packages/influxit/build-assets)
+[![Tests](https://github.com/Kwenziwa/build-assets/actions/workflows/tests.yml/badge.svg)](https://github.com/Kwenziwa/build-assets/actions/workflows/tests.yml)
+[![PHP version](https://img.shields.io/packagist/php-v/influxit/build-assets)](https://packagist.org/packages/influxit/build-assets)
+[![License](https://img.shields.io/packagist/l/influxit/build-assets)](LICENSE)
+
 Build your frontend once, commit it as a ZIP, and deploy it on servers that don't have Node.js.
 
 Works with Laravel (Artisan commands) and plain PHP (a small CLI).
@@ -44,35 +49,11 @@ git commit + push
 
 ## Installation
 
-Once published to Packagist:
-
 ```bash
 composer require influxit/build-assets
 ```
 
 Install it under `require`, not `require-dev`. Production servers that run `composer install --no-dev` would otherwise have no extract command.
-
-**Before it is on Packagist**, add one of these to your application's `composer.json`, then run `composer require influxit/build-assets:@dev`.
-
-From GitHub:
-
-```json
-{
-  "repositories": [
-    { "type": "vcs", "url": "https://github.com/Kwenziwa/build-assets" }
-  ]
-}
-```
-
-From a local folder:
-
-```json
-{
-  "repositories": [
-    { "type": "path", "url": "../influxit-build-assets", "options": { "symlink": true } }
-  ]
-}
-```
 
 ## Quick start: Laravel
 

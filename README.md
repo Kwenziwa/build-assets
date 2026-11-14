@@ -1,15 +1,46 @@
 # Influx IT Build Assets
 
-A framework-agnostic Composer package that packages compiled frontend assets into a ZIP, checks their integrity, and deploys them without Node.js on the server. It provides Laravel Artisan commands and a plain PHP CLI.
+Build your frontend once, commit it as a ZIP, and deploy it on servers that don't have Node.js.
 
-> **Status:** Initial implementation (v0.x). Do not publish as a stable 1.0 release until integration tests are run on a PHP environment with Composer, `ext-zip`, and Laravel.
+Works with Laravel (Artisan commands) and plain PHP (a small CLI).
+
+> **Status:** early version (v0.x). Test it in your own project before relying on it in production.
+
+## How it works
+
+```
+Your machine                          Server
+------------                          ------
+npm run build                         git pull
+pack  ->  build.zip                   extract  ->  public/build
+          build-manifest.json
+git commit + push
+```
+
+1. **Pack** zips your compiled assets (default `public/build`) into `build.zip` and writes `build-manifest.json` with a SHA-256 checksum.
+2. You commit and push those two files. The build folder itself stays out of Git.
+3. **Extract** on the server checks the checksum, unpacks the ZIP into a temporary folder, and swaps it into place.
+
+## Contents
+
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start: Laravel](#quick-start-laravel)
+- [Quick start: plain PHP](#quick-start-plain-php)
+- [Commands](#commands)
+- [Configuration](#configuration)
+- [Deploying on the server](#deploying-on-the-server)
+- [Security](#security)
+- [Limitations](#limitations)
+- [Troubleshooting](#troubleshooting)
+- [Tests](#tests)
 
 ## Requirements
 
-- PHP 8.2 or newer with `ext-zip`
-- Composer on systems installing the package
-- Git for Git-based workflows and a shell with `php` available in `PATH` for Git hooks
-- A compiled frontend asset folder (default: `public/build`)
+- PHP 8.2 or newer with the `zip` extension
+- Composer
+- Git, if you use the Git hooks or `deploy --pull`
+- `php` available in `PATH` on the server, if you use the Git hooks
 
 ## Installation
 
@@ -19,7 +50,21 @@ Once published to Packagist:
 composer require influxit/build-assets
 ```
 
-Before publishing, install it from a local path repository in the **application's** `composer.json`:
+Install it under `require`, not `require-dev`. Production servers that run `composer install --no-dev` would otherwise have no extract command.
+
+**Before it is on Packagist**, add one of these to your application's `composer.json`, then run `composer require influxit/build-assets:@dev`.
+
+From GitHub:
+
+```json
+{
+  "repositories": [
+    { "type": "vcs", "url": "https://github.com/Kwenziwa/build-assets" }
+  ]
+}
+```
+
+From a local folder:
 
 ```json
 {
@@ -29,14 +74,20 @@ Before publishing, install it from a local path repository in the **application'
 }
 ```
 
-Then run `composer require influxit/build-assets:@dev`. The package's own name and version must be resolvable from the repository. The library is not published to Packagist by simply downloading its ZIP.
+## Quick start: Laravel
 
-## Laravel quick start
+Laravel discovers the service provider automatically.
 
-Laravel discovers the service provider automatically. Optionally publish the configuration:
+**1. Ignore the build folder and lock file** in your application's `.gitignore`:
+
+```gitignore
+/public/build/
+/.build-assets.lock
+```
+
+**2. On your machine: build, pack, commit.**
 
 ```bash
-php artisan vendor:publish --tag=build-assets-config
 npm run build
 php artisan build:assets
 
@@ -45,28 +96,30 @@ git commit -m "Update compiled assets"
 git push
 ```
 
-On the server, use **one** of the following modes:
-
-**Git hooks (install once per clone):**
-
-```bash
-php artisan build:hooks install
-git pull
-```
-
-Merge-based pulls trigger `post-merge`; rebases may invoke `post-rewrite`. The hooks prefer `php artisan build:extract` when an `artisan` file is present; otherwise they run `php vendor/bin/build-assets extract`. This keeps Laravel configuration consistent with the hook. If your Laravel checkout lacks the package or is not bootstrapped when the hook runs, use the explicit deploy command instead. Git hooks do not automatically propagate with the repository, and an already successful pull cannot be rolled back by a failing hook.
-
-**Explicit deployment (recommended for production):**
+**3. On the server: pull and extract.**
 
 ```bash
 php artisan build:deploy --pull
 ```
 
-This uses `git pull --ff-only`, refuses to pull when tracked files have uncommitted changes (untracked files are ignored), then verifies/extracts the archive in a fresh PHP process so configuration and code changed by the pull take effect. It is safe to run when Git hooks are also installed because unchanged assets are skipped. If the CLI package is installed under `require-dev` but production Composer runs with `--no-dev`, extraction will not be available. Install under normal `require` for production extraction.
+To change the defaults, publish the config file (optional):
 
-## Plain PHP quick start
+```bash
+php artisan vendor:publish --tag=build-assets-config
+```
 
-Create `build-assets.php` in your application root (see `config/build-assets.php` for defaults). Run:
+## Quick start: plain PHP
+
+**1. Create `build-assets.php`** in your application root. Copy `examples/build-assets.php` as a starting point. Without this file the defaults are used.
+
+**2. Ignore the build folder and lock file** in `.gitignore`:
+
+```gitignore
+/public/build/
+/.build-assets.lock
+```
+
+**3. On your machine: build, pack, commit.**
 
 ```bash
 npm run build
@@ -77,34 +130,36 @@ git commit -m "Update compiled assets"
 git push
 ```
 
-On your deployment target:
+**4. On the server: pull and extract.**
 
 ```bash
-vendor/bin/build-assets hooks install  # one-time setup
-# then either:
-git pull
-# or use the explicit alternative:
 vendor/bin/build-assets deploy --pull
 ```
 
 ## Commands
 
-| Laravel | Plain PHP | Purpose |
+| What it does | Laravel | Plain PHP |
 | --- | --- | --- |
-| `php artisan build:assets` | `vendor/bin/build-assets pack` | Archive existing build assets |
-| `php artisan build:assets --compile` | `vendor/bin/build-assets pack --compile` | Run configured frontend build then archive |
-| `php artisan build:extract` | `vendor/bin/build-assets extract` | Verify and extract ZIP safely |
-| `php artisan build:extract --force` | `vendor/bin/build-assets extract --force` | Re-extract even if current |
-| `php artisan build:status` | `vendor/bin/build-assets status` | Verify archive and report deployment state |
-| `php artisan build:hooks install` | `vendor/bin/build-assets hooks install` | Install Git hooks |
-| `php artisan build:hooks remove` | `vendor/bin/build-assets hooks remove` | Remove managed Git hook blocks |
-| `php artisan build:deploy --pull` | `vendor/bin/build-assets deploy --pull` | Fast-forward pull then extract |
+| Zip the existing build | `php artisan build:assets` | `vendor/bin/build-assets pack` |
+| Run the frontend build, then zip | `php artisan build:assets --compile` | `vendor/bin/build-assets pack --compile` |
+| Verify and extract the ZIP | `php artisan build:extract` | `vendor/bin/build-assets extract` |
+| Extract even if already up to date | `php artisan build:extract --force` | `vendor/bin/build-assets extract --force` |
+| Check the ZIP and deployment state | `php artisan build:status` | `vendor/bin/build-assets status` |
+| Pull with Git, then extract | `php artisan build:deploy --pull` | `vendor/bin/build-assets deploy --pull` |
+| Install Git hooks | `php artisan build:hooks install` | `vendor/bin/build-assets hooks install` |
+| Remove Git hooks | `php artisan build:hooks remove` | `vendor/bin/build-assets hooks remove` |
 
-Plain PHP global options: `--root=/path/to/app` and `--config=/absolute/path/to/file.php`. A `--config` file that does not exist is an error. Use `--help` to list commands.
+Plain PHP global options:
+
+| Option | Meaning |
+| --- | --- |
+| `--root=/path/to/app` | Application root. Default: current directory. |
+| `--config=/path/to/file.php` | Config file. Default: `build-assets.php` in the root. A file that does not exist is an error. |
+| `--help` | List the commands. |
 
 ## Configuration
 
-Defaults are defined in `config/build-assets.php`:
+Defaults, from `config/build-assets.php`:
 
 ```php
 <?php
@@ -119,31 +174,90 @@ return [
 ];
 ```
 
-Paths are relative to the project root. **Important:** In this initial version, `git.auto_extract` and `extraction.skip_unchanged` are reserved configuration values; the hook always extracts if installed, and unchanged ZIPs are always skipped unless `--force` is used. Do not rely on these flags as toggles yet.
+| Key | Meaning |
+| --- | --- |
+| `source` | Folder that `pack` zips. |
+| `destination` | Folder that `extract` replaces. |
+| `archive` | Where the ZIP is written. |
+| `manifest` | Where the checksum file is written. |
+| `compile.command` | Command run by `pack --compile`. Use only commands you trust. |
+| `git.auto_extract` | Reserved. Not used yet. |
+| `extraction.skip_unchanged` | Reserved. Not used yet. |
 
-For Vite/Laravel, add the following to your application's `.gitignore`:
+Rules for paths:
 
-```gitignore
-/public/build/
-/.build-assets.lock
+- All paths are relative to the application root. Absolute paths, `..` and symlinks are rejected.
+- The archive and manifest must not be inside the source or destination folder.
+
+Things to know:
+
+- **The destination folder is replaced as a whole on every extract.** Do not keep uploads or other files in it.
+- Extract writes a marker file, `.build-assets-state.json`, in the destination. It records which build is deployed, and `pack` leaves it out of the ZIP.
+- Extract skips the work when the deployed build already matches the ZIP. Use `--force` to extract anyway.
+- Packing an unchanged build gives the same ZIP and checksum, so there is nothing new to commit. (Different zlib versions on different machines can still compress differently.)
+
+## Deploying on the server
+
+Pick **one** of these. Using both is safe, because an unchanged build is skipped.
+
+### Option 1: deploy command (recommended)
+
+```bash
+php artisan build:deploy --pull
+# or
+vendor/bin/build-assets deploy --pull
 ```
 
-The archive and manifest are committed, and the compiled build directory is not. The destination directory is replaced as a whole during deployment: **do not keep user uploads or other unrelated data in it.** The package writes a `.build-assets-state.json` marker inside it; `pack` leaves that file out of the archive. If your app has another deployment marker with that name, choose a different build directory.
+What it does:
 
-Archives are reproducible: entries are sorted and stored with fixed timestamps and permissions, so packing an unchanged build produces the same ZIP and checksum and nothing new to commit. (Different zlib versions can still compress differently across machines.)
+1. Refuses to continue if tracked files have uncommitted changes. Untracked files are ignored.
+2. Runs `git pull --ff-only`.
+3. Verifies and extracts the ZIP in a fresh PHP process, so config and code changed by the pull are used.
 
-## Security and limits
+### Option 2: Git hooks
 
-- SHA-256 checksum verification against the checked-in manifest (integrity, not a signature)
-- Rejects archive traversal, absolute paths, symlink entries and duplicate names
-- Extracts to staging and swaps directories; attempts to restore old assets on activation failure
-- Locks concurrent extraction with `.build-assets.lock`
-- Limits ZIP to 20,000 entries and 1 GiB total declared uncompressed size
-- Does not automatically run Git commit/push or NPM during extraction
-- Executes the configured compile command **only** when explicitly invoked with `--compile`; configure only trusted commands
-- Git hooks change local checkout behavior. Only install them in repositories you trust
+Install once per clone:
 
-**Operational caveats:** The previous asset directory is removed after a successful swap. No persistent rollback history is retained. A successful Git pull that causes an unsuccessful hook cannot be undone by this package. On systems using aggressive opcode/file caches or where atomic renames are unavailable, use an appropriate maintenance/deployment strategy. The directory swap can briefly make the destination unavailable between renames.
+```bash
+php artisan build:hooks install
+# or
+vendor/bin/build-assets hooks install
+```
+
+After that, a normal `git pull` extracts the assets.
+
+- The hooks are `post-merge` (merge pulls) and `post-rewrite` (rebases).
+- If an `artisan` file exists, the hook runs `php artisan build:extract`. Otherwise it runs `php vendor/bin/build-assets extract`.
+- Hooks are local to each clone. Git does not copy them with the repository.
+- If the hook fails, the pull has already happened and is not undone.
+- Only install hooks in repositories you trust.
+
+## Security
+
+- **Checksum:** the ZIP's SHA-256 must match the manifest before anything is extracted. This detects corruption. It is not a signature: someone who can change both files in the repository can pass the check.
+- **Safe extraction:** entries with path traversal (`../`), absolute paths, symlinks or duplicate names are rejected.
+- **Size limits:** at most 20,000 entries and 1 GiB uncompressed.
+- **Staged swap:** files are unpacked to a temporary folder first, then swapped in. If the swap fails, the previous assets are restored.
+- **Locking:** `.build-assets.lock` stops two extractions from running at the same time.
+- **No surprise commands:** extract never runs npm or Git commits. The compile command only runs with `--compile`.
+
+## Limitations
+
+- **No rollback history.** The previous assets are deleted after a successful swap.
+- **Short gap during the swap.** The destination folder is briefly missing between the two renames.
+- **Caches.** With aggressive opcode or file caches, clear them as part of your deployment.
+- **Reserved settings.** `git.auto_extract` and `extraction.skip_unchanged` have no effect yet.
+
+## Troubleshooting
+
+| Message | What to do |
+| --- | --- |
+| `Build directory missing or unsafe` | Run your frontend build first, or check `source` in the config. |
+| `Manifest missing. Run pack first.` | Run `pack` and commit both `build.zip` and `build-manifest.json`. |
+| `Manifest invalid or does not match configuration` | The `archive` or `destination` setting changed since the last pack. Pack again. |
+| `Archive checksum mismatch. Refusing to extract.` | The ZIP and manifest are from different packs, or the ZIP is damaged. Pack again and commit both files together. |
+| `Git working tree has uncommitted changes; refusing to pull.` | Commit, stash or discard the changes on the server, then deploy again. |
+| `Config file not found` | The `--config` path is wrong. |
 
 ## Tests
 
@@ -152,7 +266,7 @@ composer install
 vendor/bin/phpunit
 ```
 
-This source bundle includes unit/integration tests. Composer, ext-zip and PHPUnit are needed to run the full suite.
+The tests need Git and the `zip` extension.
 
 ## License
 

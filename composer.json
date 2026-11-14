@@ -1,0 +1,30 @@
+{
+  "name": "influxit/build-assets",
+  "description": "Package compiled frontend assets into a ZIP and deploy them with Laravel or plain PHP.",
+  "type": "library",
+  "license": "MIT",
+  "require": {
+    "php": "^8.2",
+    "ext-zip": "*"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^11.0 || ^12.0",
+    "orchestra/testbench": "^9.0 || ^10.0 || ^11.0"
+  },
+  "suggest": {
+    "laravel/framework": "Install for Artisan command integration."
+  },
+  "autoload": {
+    "psr-4": {"InfluxIT\\BuildAssets\\": "src/"}
+  },
+  "autoload-dev": {
+    "psr-4": {"InfluxIT\\BuildAssets\\Tests\\": "tests/"}
+  },
+  "bin": ["bin/build-assets"],
+  "extra": {
+    "laravel": {
+      "providers": ["InfluxIT\\BuildAssets\\Laravel\\BuildAssetsServiceProvider"]
+    }
+  },
+  "scripts": {"test": "phpunit"}
+}
